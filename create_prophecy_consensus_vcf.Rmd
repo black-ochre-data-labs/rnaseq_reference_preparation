@@ -1,0 +1,203 @@
+---
+title: "PROPHECY Consensus Variants"
+author: "Stevie Pederson"
+date: "`r format(Sys.Date(), '%d %B, %Y')`"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, incude = FALSE}
+knitr::opts_chunk$set(
+  message = FALSE, warning = FALSE, fig.height = 8, fig.width = 10
+)
+```
+
+```{r packages}
+library(transmogR)
+library(VariantAnnotation)
+library(rtracklayer)
+library(readr)
+library(plyranges)
+library(scales)
+library(pander)
+panderOptions("big.mark", ",")
+```
+
+
+## Introduction
+
+This documents the creation of the PROPHECY consensus variant set and the accompanying VCF.
+The original VCF was provided by Dr Yassine Souilmi as `prophecy_unrelated_PASS_MAF0.5_sites-only_merged.vcf.gz` containing sites passing QC which were detected in >50% of unrelated individuals, using >3 familial steps to consider two individuals unrelated.
+
+
+## Variant Preparation
+
+```{r load-vcf}
+## Load the VCF
+vcf <- VcfFile(
+	here::here(
+	  "variants", "prophecy_unrelated_PASS_MAF0.5_sites-only_merged.vcf.gz"
+	)
+)
+sq <- vcf %>% 
+  seqinfo() %>% 
+  keepStandardChromosomes() %>% 
+  dropSeqlevels("chrM") 
+genome(sq) <- "GRCh38"
+isCircular(sq) <- rep(FALSE, length(sq))
+gr <- GRanges(sq)
+param <- ScanVcfParam(fixed = "ALT", info = NA, which = gr)
+vcf_ranges <- readVcf(vcf, param = param) |> rowRanges()
+n <- length(vcf_ranges)
+vcf_ranges <- vcf_ranges[!duplicated(vcf_ranges)]
+seqlevels(vcf_ranges) <- seqlevels(sq)
+seqinfo(vcf_ranges) <- sq
+```
+
+After removing any duplicated variants, the complete set of unfiltered variants contained `r comma(length(vcf_ranges))` loci.
+
+### Multi-Allelic and Missing Sites
+
+```{r check-multi-allelic}
+alts <- vcf_ranges$ALT
+names(alts) <- names(vcf_ranges)
+alts <- unlist(alts)
+multi <- duplicated(names(alts))
+alts <- alts[!multi]
+vcf_ranges$ALT <- unname(alts)
+```
+
+`r comma(sum(multi))` multi-allelic sites were then identified and only the first alternate allele was retained
+
+```{r w0}
+w0 <- width(vcf_ranges$ALT) == 0
+vcf_ranges <- vcf_ranges[!w0] 
+```
+
+An additional `r comma(sum(w0))` sites were removed as having no alternate allele provided by GATK
+
+### Overlapping Variants
+
+```{r tidy-substitutions}
+subs <- (nchar(vcf_ranges$REF) == nchar(vcf_ranges$ALT)) & nchar(vcf_ranges$REF) > 1
+subs_to_snp <- vcf_ranges[subs] %>%
+	GPos() %>%
+	mutate(
+		REF = vcf_ranges$REF[subs] %>%
+			unlist() %>% 
+			as.character() %>%
+			strsplit(split = "") %>%
+			.[[1]],
+		ALT = vcf_ranges$ALT[subs] %>%
+			unlist() %>% 
+			as.character() %>%
+			strsplit(split = "") %>%
+			.[[1]]
+	) %>%
+	subset(REF != ALT) %>%
+	as("GRanges") %>%
+	setNames(paste0(as.character(.), ":", .$REF, ":", .$ALT)) %>%
+	mutate(REF = DNAStringSet(REF), ALT = DNAStringSet(ALT))
+vcf_ranges <- vcf_ranges[!subs] %>%
+	select(REF, ALT) %>%
+	c(subs_to_snp) %>%
+	sort() 
+```
+
+Next, `r comma(sum(subs))` sites were identified which were effectively substitutions but extending their range beyond being SNPs. 
+These were expanded into a series of SNPs and the sites retained were those for which `REF` and `ALT` alleles were different.
+
+### Incorrectly Coded InDels
+
+```{r tidy-insertions}
+bad_insertion <- width(vcf_ranges$ALT) > width(vcf_ranges) & width(vcf_ranges) > 1
+alts <- vcf_ranges[bad_insertion]$ALT
+refs <- vcf_ranges[bad_insertion]$REF
+new_alts <- Views(
+	unlist(alts), 
+	start = c(1, 1+cumsum(width(alts))[-length(alts)]), 
+	width = width(alts)
+) %>%
+	resize(
+		width = width(alts) - width(refs) + 1, fix = "end"
+	) %>% 
+	DNAStringSet()
+new_refs <- Views(
+	unlist(refs), 
+	start = c(1, 1+cumsum(width(refs))[-length(refs)]), 
+	width = width(refs)
+) %>%
+	resize(width = 1, fix = 'end') %>%
+	DNAStringSet()
+vcf_ranges[bad_insertion] <- resize(
+	vcf_ranges[bad_insertion], width = 1, fix = 'end'
+)
+vcf_ranges[bad_insertion]$REF <- new_refs
+vcf_ranges[bad_insertion]$ALT <- new_alts
+```
+
+Insertions are generally defined as replacing a 1nt sequence with a >1nt sequence.
+The `r comma(sum(bad_insertion))` loci not conforming to this rule were then identified and restructured appropriately.
+
+
+```{r tidy-deletions}
+bad_deletion <- width(vcf_ranges$ALT) < width(vcf_ranges) & width(vcf_ranges$ALT) > 1
+alts <- vcf_ranges[bad_deletion]$ALT
+refs <- vcf_ranges[bad_deletion]$REF
+new_alts <- Views(
+	unlist(alts), 
+	start = c(1, 1+cumsum(width(alts))[-length(alts)]), 
+	width = width(alts)
+) %>%
+	resize(width = 1, fix = "end") %>% 
+	DNAStringSet()
+new_refs <- Views(
+	unlist(refs), 
+	start = c(1, 1+cumsum(width(refs))[-length(refs)]), 
+	width = width(refs)
+) %>%
+	resize(
+		width = width(refs) - width(alts) + 1, fix = "end"
+	) %>% 
+	DNAStringSet()
+vcf_ranges[bad_deletion] <- resize(
+	vcf_ranges[bad_deletion], width = width(new_refs), fix = 'end'
+)
+vcf_ranges[bad_deletion]$REF <- new_refs
+vcf_ranges[bad_deletion]$ALT <- new_alts
+```
+
+Similarly, deletions are generally defined as the replacement of >1nt sequences with a single nucleotide, and the `r comma(sum(bad_deletion))` sites which did not conform to this structure were identified and restructured.
+
+### Final Corrections
+
+```{r}
+too_long <- width(vcf_ranges) > 50 | width(vcf_ranges$ALT) > 50
+dups <- duplicated(vcf_ranges)
+vcf_ranges <- vcf_ranges[!too_long & !dups] %>% 
+  sort() %>% 
+	mutate(
+		ALT = as(ALT, "DNAStringSetList")
+	)
+```
+
+The complete set of `r comma(length(vcf_ranges))` variants was then filtered a final time to remove the `r comma(sum(dups))` duplicate entries introduced by the above restructuring, and the remaining `r sum(too_long)` InDels which extended beyond 50bp.
+This reduced the set of `r comma(length(dups))` to the final set of `r comma(length(vcf_ranges))` fitting into the following categories:
+
+`r pander(table(varTypes(vcf_ranges)))`
+
+
+## Data Export
+
+```{r export}
+new_vcf <- here::here("variants", "PROPHECY_unrel_edited_0.5.vcf")
+writeVcf(
+	VCF(granges(vcf_ranges), fixed = mcols(vcf_ranges)),
+	new_vcf
+)
+write_rds(
+  vcf_ranges, here::here("variants", "PROPHECY_unrel_edited_0.5.rds"),
+  compress = "gz"
+)
+```
+

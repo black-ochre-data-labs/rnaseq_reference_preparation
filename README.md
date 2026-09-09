@@ -7,14 +7,14 @@ multi-omic pipelines, with key steps extracted and pasted into stand-alone
 scripts.
 
 The primary genomic sequences were initially obtained from the [GATK hg38 bundle](https://gatk.broadinstitute.org/hc/en-us/articles/360035890811-Resource-bundle),
-with all annotations for the primary asssembly obtained from [GENCODE Release 46](https://www.gencodegenes.org/human/release_46.html).
+with all annotations for the primary assembly obtained from [GENCODE Release 46](https://www.gencodegenes.org/human/release_46.html).
 
-The key processes are:
+The key scripts & processes are:
 
-1. Editing the reference genome to remove sequences which were not required
-2. Masking the entire chrY sequence for female participants, noting that the GATK bundle cmoes with the PAR-Y region already masked
-3. Modifying the annotations so all sequence identifiers match the modified genomic reference
-4. Creating consensus variants for incorporation into the *STARconsensus* method when aligning reads to the genome
+1. `modify_gatk_hg38.sh`: Editing the reference genome to remove sequences which were not required
+2. `make_rnaseq_ref.sh`: Masking the entire chrY sequence for female participants, noting that the GATK bundle comes with the PAR-Y region already masked
+3. `convert_gtf.R` Modifying the annotations so all sequence identifiers match the modified genomic reference
+4. `create_prophecy_consensus_vcf.Rmd` Creating consensus variants for incorporation into the *STARconsensus* method when aligning reads to the genome
 5. Creating STAR indexes for each sex-specific genome, including
    1. The standard GRCh38 reference as created in the first step
    2. A version of the GRCh38 reference for which the index was variant-aware, in keeping with the *STARconsensus* method
