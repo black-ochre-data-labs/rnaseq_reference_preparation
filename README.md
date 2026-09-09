@@ -15,6 +15,6 @@ The key scripts & processes are:
 2. `make_rnaseq_ref.sh`: Masking the entire chrY sequence for female participants, noting that the GATK bundle comes with the PAR-Y region already masked
 3. `convert_gtf.R` Modifying the annotations so all sequence identifiers match the modified genomic reference
 4. `create_prophecy_consensus_vcf.Rmd` Creating consensus variants for incorporation into the *STARconsensus* method when aligning reads to the genome
-5. Creating STAR indexes for each sex-specific genome, including
+5. `build_star_indexes.sh` Creating STAR indexes for each sex-specific genome, including
    1. The standard GRCh38 reference as created in the first step
    2. A version of the GRCh38 reference for which the index was variant-aware, in keeping with the *STARconsensus* method
