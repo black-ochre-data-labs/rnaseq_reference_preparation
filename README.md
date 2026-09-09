@@ -12,9 +12,7 @@ with all annotations for the primary asssembly obtained from [GENCODE Release 46
 The key processes are:
 
 1. Editing the reference genome to remove sequences which were not required
-2. Masking:
-   1. The entire chrY sequence for female participants
-   2. The chrY pseudo-autosomal region (PAR) for male participants
+2. Masking the entire chrY sequence for female participants, noting that the GATK bundle cmoes with the PAR-Y region already masked
 3. Modifying the annotations so all sequence identifiers match the modified genomic reference
 4. Creating consensus variants for incorporation into the *STARconsensus* method when aligning reads to the genome
 5. Creating STAR indexes for each sex-specific genome, including
